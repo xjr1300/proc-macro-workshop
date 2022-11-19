@@ -8,24 +8,26 @@ the 5 projects here, 3 are macros that I have personally implemented in
 industrial codebases for work, and the other 2 exist as libraries on crates.io
 by other authors.*
 
-<br>
-
 ## Contents
 
-- [**Suggested prerequisites**](#suggested-prerequisites)
-- [**Projects**](#projects) — Introduction to each of the projects
-  - [**Derive macro:** `derive(Builder)`](#derive-macro-derivebuilder)
-  - [**Derive macro:** `derive(CustomDebug)`](#derive-macro-derivecustomdebug)
-  - [**Function-like macro:** `seq!`](#function-like-macro-seq)
-  - [**Attribute macro:** `#[sorted]`](#attribute-macro-sorted)
-  - [**Attribute macro:** `#[bitfield]`](#attribute-macro-bitfield)
-  - [**Project recommendations**](#project-recommendations) — What to work on
+- [Rust Latam: procedural macros workshop](#rust-latam-procedural-macros-workshop)
+  - [Contents](#contents)
+  - [Suggested prerequisites](#suggested-prerequisites)
+  - [Projects](#projects)
+    - [Derive macro: `derive(Builder)`](#derive-macro-derivebuilder)
+    - [Derive macro: `derive(CustomDebug)`](#derive-macro-derivecustomdebug)
+    - [Function-like macro: `seq!`](#function-like-macro-seq)
+    - [Attribute macro: `#[sorted]`](#attribute-macro-sorted)
+    - [Attribute macro: `#[bitfield]`](#attribute-macro-bitfield)
+    - [Project recommendations](#project-recommendations)
+  - [Test harness](#test-harness)
+  - [Workflow](#workflow)
+  - [Debugging tips](#debugging-tips)
+    - [License](#license)
     depending on your interests
 - [**Test harness**](#test-harness) — Explanation of how testing is set up
 - [**Workflow**](#workflow) — Recommended way to work through the workshop
 - [**Debugging tips**](#debugging-tips)
-
-<br>
 
 ## Suggested prerequisites
 
@@ -37,8 +39,6 @@ assume a working understanding of structs, enums, traits, trait impls, generic
 parameters, and trait bounds. You are welcome to dive into the workshop with any
 level of experience with Rust, but you may find that these basics are far easier
 to learn for the first time outside of the context of macros.
-
-<br>
 
 ## Projects
 
