@@ -424,6 +424,9 @@ macro.
 
 [cargo expand]: https://github.com/dtolnay/cargo-expand
 
+リポジトリルート(`proc-macro-workshop`に`main.rs`を作成して、テストケースを貼り付ける。
+その後、リポジトリ・ルートで`cargo expand`を実行すると、マクロを展開した結果を確認できる。
+
 If a macro is emitting syntactically invalid code (not just code that fails
 type-checking) then cargo expand will not be able to show it. Instead have the
 macro print its generated TokenStream to stderr before returning the tokens.
