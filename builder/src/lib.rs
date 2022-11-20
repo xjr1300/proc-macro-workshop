@@ -15,7 +15,7 @@ pub fn derive(input: TokenStream) -> TokenStream {
         }
 
         impl CommandBuilder {
-            fn executable(&mut self, executable: String) ->&mut Self {
+            fn executable(&mut self, executable: String) -> &mut Self {
                 self.executable = Some(executable);
                 self
             }
@@ -33,6 +33,15 @@ pub fn derive(input: TokenStream) -> TokenStream {
             fn current_dir(&mut self, current_dir: String) -> &mut Self {
                 self.current_dir = Some(current_dir);
                 self
+            }
+
+            pub fn build(&mut self) -> Result<Command, Box<dyn std::error::Error>> {
+                Ok(Command {
+                    executable: self.executable.take().ok_or_else(|| String::from("executable is none"))?,
+                    args: self.args.take().ok_or_else(|| String::from("env args is none"))?,
+                    env: self.env.take().ok_or_else(|| String::from("env is none"))?,
+                    current_dir: self.current_dir.take().ok_or_else(|| String::from("current_dir is none"))?,
+                })
             }
         }
 
