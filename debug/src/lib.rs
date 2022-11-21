@@ -44,6 +44,9 @@ fn derive_builder(input: DeriveInput) -> Result<TokenStream2> {
         let ident = input.ident;
         let struct_name = ident.to_string();
 
+        let generics = add_debug_trait_bound(input.generics);
+        let (impl_generics, ty_generics, where_clause) = generics.split_for_impl();
+
         let fields = named
             .iter()
             .map(|f| (f.ident.as_ref().expect("field have ident"), &f.ty));
@@ -71,7 +74,7 @@ fn derive_builder(input: DeriveInput) -> Result<TokenStream2> {
         });
 
         Ok(quote!(
-            impl ::std::fmt::Debug for #ident {
+            impl #impl_generics ::std::fmt::Debug for #ident #ty_generics #where_clause {
                 fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
                     f.debug_struct(#struct_name)
                     #(#debug_fields)*
@@ -94,4 +97,21 @@ fn inspect_debug(attr: &syn::Attribute) -> Result<Option<TokenStream2>> {
         },
         _ => Ok(None),
     }
+}
+
+fn add_debug_trait_bound(mut generics: syn::Generics) -> syn::Generics {
+    for param in &mut generics.params {
+        /*
+        pub enum GenericParam {
+            Type(TypeParam),
+            Lifetime(LifetimeDef),
+            Const(ConstParam),
+        }
+         */
+        if let syn::GenericParam::Type(ref mut type_param) = *param {
+            type_param.bounds.push(syn::parse_quote!(::std::fmt::Debug));
+        }
+    }
+
+    generics
 }
