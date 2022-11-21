@@ -252,14 +252,14 @@ fn inspect_each(attr: &syn::Attribute) -> Result<Option<Ident>> {
                     Lit::Str(s) if path.is_ident("each") => {
                         Ok(Some(format_ident!("{}", s.value())))
                     }
-                    _ => Err(Error::new(
-                        meta.span(),
+                    _ => Err(Error::new_spanned(
+                        meta,
                         "expected `builder(each = \"...\")`",
                     )),
                 }
             } else {
-                Err(Error::new(
-                    meta.span(),
+                Err(Error::new_spanned(
+                    meta,
                     "expected `builder(each = \"...\")`",
                 ))
             }
