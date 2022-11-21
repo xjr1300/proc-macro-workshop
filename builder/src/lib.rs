@@ -84,9 +84,7 @@ fn derive_builder(input: DeriveInput) -> Result<TokenStream2> {
         let builder_fields = fields.clone().map(
             |(identifier, field_type)| quote! { #identifier: ::core::option::Option<#field_type>},
         );
-        let builder_init_fields = fields
-            .clone()
-            .map(|(identifier, _)| quote! { #identifier: ::core::option::Option::None});
+        let builder_init_fields = fields.clone().map(builder_init_field);
         let builder_methods = fields
             .clone()
             .map(|(identifier, field_type)| impl_builder_method(identifier, field_type));
@@ -127,12 +125,84 @@ fn derive_builder(input: DeriveInput) -> Result<TokenStream2> {
     }
 }
 
+/// 構造体のフィールドの型がOptionの場合、そのフィールドに対応するビルダーのフィールドは、
+/// 値が設定されていないことを示すために、二重のSomeでラップする必要がある。
+/// builder.option_field = Some(Some(...))
+/// builder.option_field = Some(None)
+/// 二重のSomeでラップしない場合、ビルダーのbuildメソッド内で実行するOption::take()メソッドが
+/// 失敗する。
 fn impl_builder_method(identifier: &Ident, field_type: &Type) -> TokenStream2 {
-    quote! {
-        fn #identifier(&mut self, #identifier: #field_type) -> &mut Self {
-            self.#identifier = ::core::option::Option::Some(#identifier);
-
-            self
+    match determine_field_type(field_type) {
+        FieldType::Option(inner_type) => {
+            quote! {
+                fn #identifier(&mut self, #identifier: #inner_type) -> &mut Self {
+                    self.#identifier = ::core::option::Option::Some(
+                        ::core::option::Option::Some(#identifier)
+                    );
+                    self
+                }
+            }
+        }
+        _ => {
+            quote! {
+                fn #identifier(&mut self, #identifier: #field_type) -> &mut Self {
+                    self.#identifier = ::core::option::Option::Some(#identifier);
+                    self
+                }
+            }
         }
     }
+}
+
+fn builder_init_field((identifier, field_type): (&Ident, &Type)) -> TokenStream2 {
+    match determine_field_type(field_type) {
+        FieldType::Option(_) => {
+            quote! { #identifier: ::core::option::Option::Some(::core::option::Option::None) }
+        }
+        FieldType::Vec(_) => {
+            quote! { #identifier: ::core::option::Option::Some(::std::vec::Vec::new()) }
+        }
+        FieldType::Raw => {
+            quote! { #identifier: ::core::option::Option::None }
+        }
+    }
+}
+
+enum FieldType {
+    Raw,
+    Option(Type),
+    Vec(Type),
+}
+
+fn determine_field_type(field_type: &Type) -> FieldType {
+    use syn::{
+        AngleBracketedGenericArguments, GenericArgument, Path, PathArguments, PathSegment, TypePath,
+    };
+    if let Type::Path(TypePath {
+        qself: None,
+        path: Path {
+            leading_colon,
+            segments,
+        },
+    }) = field_type
+    {
+        if leading_colon.is_none() && segments.len() == 1 {
+            if let Some(PathSegment {
+                ident,
+                arguments:
+                    PathArguments::AngleBracketed(AngleBracketedGenericArguments { args, .. }),
+            }) = segments.first()
+            {
+                if let (1, Some(GenericArgument::Type(t))) = (args.len(), args.first()) {
+                    if ident == "Option" {
+                        return FieldType::Option(t.clone());
+                    } else if ident == "Vec" {
+                        return FieldType::Vec(t.clone());
+                    }
+                }
+            }
+        }
+    }
+
+    FieldType::Raw
 }
