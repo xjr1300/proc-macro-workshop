@@ -56,7 +56,7 @@ pub struct Field {
 }
 */
 
-#[proc_macro_derive(Builder)]
+#[proc_macro_derive(Builder, attributes(builder))]
 pub fn derive(input: TokenStream) -> TokenStream {
     let input: DeriveInput = parse_macro_input!(input as DeriveInput);
 
@@ -85,9 +85,20 @@ fn derive_builder(input: DeriveInput) -> Result<TokenStream2> {
             |(identifier, field_type)| quote! { #identifier: ::core::option::Option<#field_type>},
         );
         let builder_init_fields = fields.clone().map(builder_init_field);
-        let builder_methods = fields
-            .clone()
-            .map(|(identifier, field_type)| impl_builder_method(identifier, field_type));
+        let each_attributes = named
+            .iter()
+            .map(|f| match f.attrs.first() {
+                Some(attr) => inspect_each(attr),
+                None => Ok(None),
+            })
+            .collect::<Result<Vec<_>>>()?;
+        let builder_methods =
+            fields
+                .clone()
+                .zip(each_attributes)
+                .map(|((identifier, field_type), maybe_each)| {
+                    impl_builder_method(identifier, field_type, maybe_each)
+                });
 
         Ok(quote! {
             struct #builder {
@@ -131,7 +142,8 @@ fn derive_builder(input: DeriveInput) -> Result<TokenStream2> {
 /// builder.option_field = Some(None)
 /// 二重のSomeでラップしない場合、ビルダーのbuildメソッド内で実行するOption::take()メソッドが
 /// 失敗する。
-fn impl_builder_method(identifier: &Ident, field_type: &Type) -> TokenStream2 {
+fn impl_builder_method(identifier: &Ident, field_type: &Type, each: Option<Ident>) -> TokenStream2 {
+    let has_each = each.is_some();
     match determine_field_type(field_type) {
         FieldType::Option(inner_type) => {
             quote! {
@@ -139,6 +151,15 @@ fn impl_builder_method(identifier: &Ident, field_type: &Type) -> TokenStream2 {
                     self.#identifier = ::core::option::Option::Some(
                         ::core::option::Option::Some(#identifier)
                     );
+                    self
+                }
+            }
+        }
+        FieldType::Vec(inner_type) if has_each => {
+            let each = each.unwrap();
+            quote! {
+                fn #each(&mut self, #each: #inner_type) -> &mut Self {
+                    self.#identifier.as_mut().map(|v| v.push(#each));
                     self
                 }
             }
@@ -169,11 +190,23 @@ fn builder_init_field((identifier, field_type): (&Ident, &Type)) -> TokenStream2
 }
 
 enum FieldType {
+    /// 通常の型。
     Raw,
+    /// オプション型。
     Option(Type),
+    /// ベクタ型。
     Vec(Type),
 }
 
+/// pub struct TypePath {
+///     pub qself: Option<QSelf>,
+///     pub path: Path,
+/// }
+///
+/// pub struct Path {
+///     pub leading_colon: Option<Colon2>,
+///     pub segments: Punctuated<PathSegment, Colon2>,
+/// }
 fn determine_field_type(field_type: &Type) -> FieldType {
     use syn::{
         AngleBracketedGenericArguments, GenericArgument, Path, PathArguments, PathSegment, TypePath,
@@ -205,4 +238,32 @@ fn determine_field_type(field_type: &Type) -> FieldType {
     }
 
     FieldType::Raw
+}
+
+fn inspect_each(attr: &syn::Attribute) -> Result<Option<Ident>> {
+    use syn::{Lit, Meta, MetaList, MetaNameValue, NestedMeta};
+    let meta = attr.parse_meta()?;
+    match &meta {
+        Meta::List(MetaList { path, nested, .. }) if path.is_ident("builder") => {
+            if let Some(NestedMeta::Meta(Meta::NameValue(MetaNameValue { lit, path, .. }))) =
+                nested.first()
+            {
+                match lit {
+                    Lit::Str(s) if path.is_ident("each") => {
+                        Ok(Some(format_ident!("{}", s.value())))
+                    }
+                    _ => Err(Error::new(
+                        meta.span(),
+                        "expected `builder(each = \"...\")`",
+                    )),
+                }
+            } else {
+                Err(Error::new(
+                    meta.span(),
+                    "expected `builder(each = \"...\")`",
+                ))
+            }
+        }
+        _ => Ok(None),
+    }
 }
