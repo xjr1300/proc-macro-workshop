@@ -3,6 +3,7 @@ use derive_debug::CustomDebug;
 #[derive(CustomDebug)]
 pub struct Field {
     name: &'static str,
+    #[debug = "0b{:08b}"]
     bitmask: u8,
 }
 
@@ -13,6 +14,7 @@ fn main() {
     };
 
     let debug = format!("{:?}", f);
+    let expected = r#"Field { name: "F", bitmask: 0b00011100 }"#;
 
-    assert!(debug.starts_with(r#"Field { name: "F","#));
+    assert_eq!(debug, expected);
 }
