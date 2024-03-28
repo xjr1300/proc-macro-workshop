@@ -2,8 +2,9 @@ use proc_macro::TokenStream;
 use proc_macro2::TokenStream as TokenStream2;
 use quote::{format_ident, quote};
 use syn::{
-    parse_macro_input, spanned::Spanned, Data, DataStruct, DeriveInput, Error, Fields, FieldsNamed,
-    Ident, Result, Type,
+    parse_macro_input, punctuated::Punctuated, spanned::Spanned, AngleBracketedGenericArguments,
+    Attribute, Data, DataStruct, DeriveInput, Error, Expr, Fields, FieldsNamed, GenericArgument,
+    Ident, Lit, MetaNameValue, Path, PathArguments, PathSegment, Result, Token, Type, TypePath,
 };
 
 /*
@@ -57,35 +58,43 @@ pub struct Field {
 */
 
 #[proc_macro_derive(Builder, attributes(builder))]
-pub fn derive(input: TokenStream) -> TokenStream {
+pub fn derive_builder(input: TokenStream) -> TokenStream {
     let input: DeriveInput = parse_macro_input!(input as DeriveInput);
 
-    match derive_builder(input) {
+    match impl_builder(input) {
         Ok(token_stream) => TokenStream::from(token_stream),
         Err(err) => TokenStream::from(err.into_compile_error()),
     }
 }
 
-fn derive_builder(input: DeriveInput) -> Result<TokenStream2> {
+fn impl_builder(input: DeriveInput) -> Result<TokenStream2> {
     if let Data::Struct(DataStruct {
-        fields: Fields::Named(FieldsNamed { named, .. }),
+        fields:
+            Fields::Named(FieldsNamed {
+                named: named_fields,
+                ..
+            }),
         ..
     }) = input.data
     {
-        let identifier = input.ident;
-        let builder = format_ident!("{}Builder", identifier);
+        let ident = input.ident;
+        let builder_ident = format_ident!("{}Builder", ident);
 
         // ビルダーを作成する対象の構造体のフィールド名とフィールドの型を取得
-        let fields = named
-            .iter()
-            .map(|f| (f.ident.as_ref().expect("field have ident"), &f.ty));
-        let field_identifiers = fields.clone().map(|(identifier, _)| identifier);
+        let mut fields: Vec<(Ident, Type)> = vec![];
+        for name_field in named_fields.iter() {
+            fields.push((
+                name_field.ident.as_ref().unwrap().clone(),
+                name_field.ty.clone(),
+            ));
+        }
+        let field_idents = fields.iter().map(|(ident, _)| ident);
         // ビルダーのフィールドを作成
-        let builder_fields = fields.clone().map(
-            |(identifier, field_type)| quote! { #identifier: ::core::option::Option<#field_type>},
-        );
-        let builder_init_fields = fields.clone().map(builder_init_field);
-        let each_attributes = named
+        let builder_fields = fields
+            .iter()
+            .map(|(ident, field_ty)| quote! { #ident: ::core::option::Option<#field_ty>});
+        let builder_init_fields = fields.iter().map(builder_init_field);
+        let each_attributes = named_fields
             .iter()
             .map(|f| match f.attrs.first() {
                 Some(attr) => inspect_each(attr),
@@ -94,38 +103,38 @@ fn derive_builder(input: DeriveInput) -> Result<TokenStream2> {
             .collect::<Result<Vec<_>>>()?;
         let builder_methods =
             fields
-                .clone()
+                .iter()
                 .zip(each_attributes)
                 .map(|((identifier, field_type), maybe_each)| {
                     impl_builder_method(identifier, field_type, maybe_each)
                 });
 
         Ok(quote! {
-            struct #builder {
+            struct #builder_ident {
                 #(#builder_fields),*
             }
 
-            impl #builder {
+            impl #builder_ident {
                 #(#builder_methods)*
 
                 fn build(&mut self) -> ::core::result::Result<
-                    #identifier,
+                    #ident,
                     ::std::boxed::Box<dyn ::std::error::Error>>
                 {
-                    Ok(#identifier {
+                    Ok(#ident {
                         #(
-                            #field_identifiers:
-                                self.#field_identifiers.take().ok_or_else(||
-                                    format!("{} is not provided", stringify!(#field_identifiers))
+                            #field_idents:
+                                self.#field_idents.take().ok_or_else(||
+                                    format!("{} is not provided", stringify!(#field_idents))
                             )?,
                         )*
                     })
                 }
             }
 
-            impl #identifier {
-                fn builder() -> #builder {
-                    #builder {
+            impl #ident {
+                fn builder() -> #builder_ident {
+                    #builder_ident {
                         #(#builder_init_fields),*
                     }
                 }
@@ -175,7 +184,7 @@ fn impl_builder_method(identifier: &Ident, field_type: &Type, each: Option<Ident
     }
 }
 
-fn builder_init_field((identifier, field_type): (&Ident, &Type)) -> TokenStream2 {
+fn builder_init_field((identifier, field_type): &(Ident, Type)) -> TokenStream2 {
     match determine_field_type(field_type) {
         FieldType::Option(_) => {
             quote! { #identifier: ::core::option::Option::Some(::core::option::Option::None) }
@@ -208,9 +217,6 @@ enum FieldType {
 ///     pub segments: Punctuated<PathSegment, Colon2>,
 /// }
 fn determine_field_type(field_type: &Type) -> FieldType {
-    use syn::{
-        AngleBracketedGenericArguments, GenericArgument, Path, PathArguments, PathSegment, TypePath,
-    };
     if let Type::Path(TypePath {
         qself: None,
         path: Path {
@@ -240,30 +246,46 @@ fn determine_field_type(field_type: &Type) -> FieldType {
     FieldType::Raw
 }
 
-fn inspect_each(attr: &syn::Attribute) -> Result<Option<Ident>> {
-    use syn::{Lit, Meta, MetaList, MetaNameValue, NestedMeta};
-    let meta = attr.parse_meta()?;
-    match &meta {
-        Meta::List(MetaList { path, nested, .. }) if path.is_ident("builder") => {
-            if let Some(NestedMeta::Meta(Meta::NameValue(MetaNameValue { lit, path, .. }))) =
-                nested.first()
-            {
-                match lit {
-                    Lit::Str(s) if path.is_ident("each") => {
-                        Ok(Some(format_ident!("{}", s.value())))
-                    }
-                    _ => Err(Error::new_spanned(
-                        meta,
-                        "expected `builder(each = \"...\")`",
-                    )),
-                }
-            } else {
-                Err(Error::new_spanned(
-                    meta,
+fn inspect_each(attr: &Attribute) -> Result<Option<Ident>> {
+    // builder属性でない場合
+    if !attr.path().is_ident("builder") {
+        return Ok(None);
+    }
+    // builder属性内にある名前と値のリストを取得
+    let name_values: CommaPunctuatedNameValues = attr
+        .parse_args_with(Punctuated::parse_terminated)
+        .map_err(|err| {
+            syn::Error::new_spanned(attr, format!("failed to parse builder attribute: {}", err))
+        })?;
+    // builder属性には名前と値のペアが1つだけか確認
+    if name_values.len() != 1 {
+        return Err(syn::Error::new_spanned(
+            attr,
+            "expected `builder(each = \"...\")`",
+        ));
+    }
+    let name_value = name_values.first().unwrap();
+    // 名前の値のペアについて、名前がeachか確認
+    match name_value.path.is_ident("each") {
+        true => match &name_value.value {
+            Expr::Lit(expr_lit) => match &expr_lit.lit {
+                Lit::Str(value) => Ok(Some(format_ident!("{}", value.value()))),
+                _ => Err(syn::Error::new_spanned(
+                    attr,
                     "expected `builder(each = \"...\")`",
-                ))
-            }
-        }
-        _ => Ok(None),
+                )),
+            },
+            _ => Err(syn::Error::new_spanned(
+                attr,
+                "expected `builder(each = \"...\")`",
+            )),
+        },
+        false => Err(syn::Error::new_spanned(
+            attr,
+            "expected `builder(each = \"...\")`",
+        )),
     }
 }
+
+/// `foo = "a", bar = "b"`のような、カンマで区切られた名前と値のリスト
+pub(crate) type CommaPunctuatedNameValues = Punctuated<MetaNameValue, Token![,]>;
